@@ -13,7 +13,6 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
-import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.World;
@@ -30,7 +29,6 @@ import io.wasabi.urg.elements.game.Tile;
 import io.wasabi.urg.elements.game.Wheel;
 import io.wasabi.urg.managers.CardInputHandler;
 import io.wasabi.urg.managers.CharmInputHandler;
-import io.wasabi.urg.managers.FontManager;
 import io.wasabi.urg.managers.RendererManager;
 import io.wasabi.urg.managers.SoundManager;
 import io.wasabi.urg.ui.*;
@@ -60,15 +58,12 @@ public class GameScreen implements Screen {
     private final ShapeRenderer shapeRenderer;
     private final SpriteBatch spriteBatch;
 
-    // Matrices for UI rendering
-    private final Matrix4 uiProjection = new Matrix4();
-    private final Matrix4 uiTransform = new Matrix4();
-
     // Physics
     private final World world;
 
     // Miscellaneous
     private List<GameObject> particles = new ArrayList<GameObject>();
+    private final Random random = new Random();
 
     // Elements
     private Ball ball;
@@ -133,8 +128,13 @@ public class GameScreen implements Screen {
         launchSpin(true);
     }
 
+    /**
+     * Launches the ball and spins the wheel. If freeSpin is true, it will not consume a spin.
+     *
+     * @param free Whether this spin is a free spin (does not consume a spin).
+     */
     private void launchSpin(boolean free) {
-        float initialSpeed = new Random().nextFloat() * INITIAL_SPEED_RANGE + MIN_INITIAL_SPEED;
+        float initialSpeed = random.nextFloat() * INITIAL_SPEED_RANGE + MIN_INITIAL_SPEED;
         Roulette.getInstance().getRunState().triggerEffects("beforeSpin");
         SoundManager.getInstance().playSound("spin1");
         ball.setVisible(true);
@@ -149,6 +149,9 @@ public class GameScreen implements Screen {
         quotaTracker.onSpinStarted();
     }
 
+    /**
+     * Handles input for the game screen, including UI interactions and game state transitions.
+     */
     private void handleUIInput() {
 
         if (gameState == GameState.RESULT) {
@@ -160,13 +163,20 @@ public class GameScreen implements Screen {
             if (shop.handleInput()) {
                 enterRoundScreen();
             }
-        } else if (gameState == GameState.GAME_OVER && gameOver.isVisible()) {
-            if (Gdx.input.justTouched()) {
-                restartGame();
-            }
+        } else if (gameState == GameState.GAME_OVER && gameOver.isVisible() && Gdx.input.justTouched()) {
+            restartGame();
         }
     }
 
+    /**
+     * Updates the game state to the result screen 
+     * after a round is completed, showing the results and rewards.
+     * @param chips The number of chips the player has at the end of the round.
+     * @param quota The quota that was set for the round.
+     * @param baseReward The base reward for completing the round.
+     * @param unusedSpinBonus The bonus for any unused spins.
+     * @param totalReward The total reward calculated from the base reward and any bonuses.
+     */
     public void enterResultScreen(int chips, int quota, int baseReward, int unusedSpinBonus, int totalReward) {
         this.gameState = GameState.RESULT;
         wheel.shiftOutOfScreen();
@@ -233,7 +243,6 @@ public class GameScreen implements Screen {
 
     @Override
     public void render(float delta) {
-        // TODO: game screen rendering
         // includes the roulette wheel & the ui
         ScreenUtils.clear(0.5f, 0.5f, 0.5f, 1);
 
@@ -245,18 +254,7 @@ public class GameScreen implements Screen {
         ball.update(delta);
         ball.render();
 
-        // couple of checks if button can be pressed
-        SpinButton.State spinButtonState;
-
-        if (ball.getState() != Ball.State.STOPPED || winAnimation.isActive()) {
-            spinButtonState = SpinButton.State.SPINNING;
-        } else if (game.getRunState().getActiveBets().isEmpty()) {
-            spinButtonState = SpinButton.State.NO_BET;
-        } else {
-            spinButtonState = SpinButton.State.READY;
-        }
-
-        wheel.updateSpinButton(spinButtonState, game.getCamera());
+        wheel.updateSpinButton(getSpinButtonState(), game.getCamera());
 
         // SpriteBatch renders
         updateBetButtonLayout();
@@ -270,7 +268,7 @@ public class GameScreen implements Screen {
         shop.render();
 
         handleUIInput();
-        //handleDebugWinInput();
+        
         handleTileSelectionInput();
         handleWheelRotationInput();
 
@@ -283,52 +281,8 @@ public class GameScreen implements Screen {
         batch.begin();
         batch.setTransformMatrix(new Matrix4().setToTranslation(0, 0, 0));
 
-        // Card Inventory Rendering
-        List<Card> cards = game.getRunState().getOwnedCards();
-        Card draggedCard = null;
         float worldWidth = game.getViewport().getWorldWidth();
-        float worldHeight = game.getViewport().getWorldHeight();
-
-        CardLayout.renderBackPanel(batch, game.getRunState().getMaxHandSize(), cards.size());
-        for (int i = 0; i < cards.size(); i++) {
-            Card card = cards.get(i);
-            Vector2 slot = CardLayout.getSlotPosition(i, cards.size(), worldWidth);
-            card.setTargetPosition(slot.x, slot.y);
-            card.update(delta);
-            if (card.isDragging()) {
-                draggedCard = card;
-                continue;
-            }
-            card.render();
-        }
-
-        // Charm Inventory Rendering
-        List<AbstractCharm> charms = game.getRunState().getOwnedCharms();
-        AbstractCharm draggedCharm = null;
-
-        CharmLayout.renderBackPanel(batch, game.getRunState().getMaxOwnableCharms(), charms.size());
-        for (int i = 0; i < charms.size(); i++) {
-            AbstractCharm c = charms.get(i);
-            Vector2 slot = CharmLayout.getSlotPosition(i, charms.size(), worldWidth);
-            c.setTargetPosition(slot.x, slot.y);
-            c.update(delta);
-            if (c.isDragging()) {
-                draggedCharm = c;
-                continue;
-            }
-            c.render();
-        }
-
-        // draw dragged elements at the end
-        if (draggedCard != null)
-            draggedCard.render();
-        if (draggedCharm != null)
-            draggedCharm.render();
-        if (shop.getDraggedCard() != null)
-            shop.renderCard(shop.getDraggedCard());
-        if (shop.getDraggedCharm() != null)
-            shop.renderCharm(shop.getDraggedCharm());
-
+        renderInventory(batch, delta, worldWidth);
         batch.end();
 
         winAnimation.update(delta);
@@ -343,17 +297,75 @@ public class GameScreen implements Screen {
 
         if (gameState == GameState.ROUND) {
             quotaTracker.render();
-            //renderDebugWinButton();
         }
 
-        // render all particles
+        renderParticles(delta);
+
+        gameOver.update(delta);
+        gameOver.render();
+    }
+    
+    /**
+     * Determines the current state of the spin button based on the game state and wheel status.
+     *
+     * @return The current state of the spin button.
+     */
+    private SpinButton.State getSpinButtonState() {
+        if (ball.getState() != Ball.State.STOPPED) {
+            return SpinButton.State.SPINNING;
+        }
+        return game.getRunState().getActiveBets().isEmpty()
+                ? SpinButton.State.NO_BET : SpinButton.State.READY;
+    }
+
+    /**
+     * Renders the player's inventory of cards and charms
+     *
+     * @param batch The SpriteBatch used for rendering.
+     * @param delta The time elapsed since the last frame.
+     * @param worldWidth The width of the game world for layout calculations.
+     */
+    private void renderInventory(SpriteBatch batch, float delta, float worldWidth) {
+        List<Card> cards = game.getRunState().getOwnedCards();
+        Card draggedCard = null;
+        CardLayout.renderBackPanel(batch, game.getRunState().getMaxHandSize(), cards.size());
+        for (int i = 0; i < cards.size(); i++) {
+            Card card = cards.get(i);
+            Vector2 slot = CardLayout.getSlotPosition(i, cards.size(), worldWidth);
+            card.setTargetPosition(slot.x, slot.y);
+            card.update(delta);
+            if (card.isDragging()) draggedCard = card;
+            else card.render();
+        }
+
+        List<AbstractCharm> charms = game.getRunState().getOwnedCharms();
+        AbstractCharm draggedCharm = null;
+        CharmLayout.renderBackPanel(batch, game.getRunState().getMaxOwnableCharms(), charms.size());
+        for (int i = 0; i < charms.size(); i++) {
+            AbstractCharm charm = charms.get(i);
+            Vector2 slot = CharmLayout.getSlotPosition(i, charms.size(), worldWidth);
+            charm.setTargetPosition(slot.x, slot.y);
+            charm.update(delta);
+            if (charm.isDragging()) draggedCharm = charm;
+            else charm.render();
+        }
+
+        if (draggedCard != null) draggedCard.render();
+        if (draggedCharm != null) draggedCharm.render();
+        if (shop.getDraggedCard() != null) shop.renderCard(shop.getDraggedCard());
+        if (shop.getDraggedCharm() != null) shop.renderCharm(shop.getDraggedCharm());
+    }
+
+    /**
+     * Renders any active particles in the game world.
+     *
+     * @param delta The time elapsed since the last frame.
+     */
+    private void renderParticles(float delta) {
         for (GameObject particle : particles) {
             particle.update(delta);
             particle.render();
         }
-
-        gameOver.update(delta);
-        gameOver.render();
     }
 
     @Override
@@ -365,7 +377,7 @@ public class GameScreen implements Screen {
     public void show() {
         Gdx.input.setInputProcessor(inputMultiplexer);
 
-        betButtonTexture = new Texture(Gdx.files.internal("buttons/TEX_BUTTON_64x32_BetUp.png"));
+        betButtonTexture = new Texture(Gdx.files.internal("buttons/TEX_Button_64x32_BetUp.png"));
 
         float btnWidth = betButtonTexture.getWidth();
         float btnHeight = betButtonTexture.getHeight();
@@ -454,6 +466,12 @@ public class GameScreen implements Screen {
         lastWheelRotationAngle = currentAngleDeg;
     }
 
+    /**
+     * Wraps an angle in degrees to the range [-180, 180].
+     *
+     * @param degrees The angle in degrees to wrap.
+     * @return The wrapped angle in degrees.
+     */
     private float wrapDegrees(float degrees) {
         degrees %= 360f;
         if (degrees > 180f)
@@ -530,12 +548,12 @@ public class GameScreen implements Screen {
 
     @Override
     public void pause() {
-
+        // put functionality when screen is paused, if needed
     }
 
     @Override
-    public void resume() {
-
+    public void resume() { 
+        // put functionality when screen is resumed, if needed
     }
 
     @Override
